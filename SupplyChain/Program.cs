@@ -1,39 +1,35 @@
 ﻿Console.OutputEncoding = System.Text.Encoding.UTF8;
 
-const string connectionString = "Host=localhost;Database=logist_system;Username=yulia;Password=pass";
+const string postgresConnection = "Host=localhost;Database=logist_system;Username=yulia;Password=pass";
+const string mongoConnection = "mongodb://localhost:27017";
+const string neo4jUri = "bolt://localhost:7687";
 
-using var uow = new UnitOfWork(connectionString);
+Console.WriteLine("1 - порівняння швидкодії SQL і MongoDB");
+Console.WriteLine("2 - Neo4j: мережа постачальників");
 
-try
+switch (Console.ReadLine())
 {
-    int orderId = uow.PurchaseOrders.Create(supplierId: 1, warehouseId: 2, userId: 2);
-    uow.PurchaseOrders.AddItem(orderId, productId: 1, quantity: 100, userId: 2);
-    uow.PurchaseOrders.AddItem(orderId, productId: 2, quantity: 50, userId: 2);
-    uow.PurchaseOrders.Send(orderId, userId: 2);
-    uow.PurchaseOrders.Receive(orderId, userId: 2);
+    case "1":
+        new ShipmentBenchmark(postgresConnection, mongoConnection).Run();
+        break;
 
-    uow.Suppliers.SoftDelete(supplierId: 2, userId: 1);
+    case "2":
+        using (var graph = new Neo4jSupplierGraph(neo4jUri, "neo4j", "password123"))
+        {
+            await graph.LoadFrom(postgresConnection);
 
-    uow.Commit();
-    Console.WriteLine("Збережено.");
+            Print("Товари постачальника 1", await graph.ProductsOfSupplier(1));
+            Print("Постачальники товару 1 (від дешевшого)", await graph.SuppliersOfProduct(1));
+            Print("Склади, які отримують товар від постачальника 1", await graph.WarehousesOfSupplier(1));
+            Print("Товари без іншого постачальника, якщо постачальник 1 зупиниться", await graph.ProductsWithoutAlternative(1));
+        }
+        break;
 }
-catch (Exception ex)
+
+static void Print(string title, List<string> lines)
 {
-    uow.Rollback();
-    Console.WriteLine("Скасовано: " + ex.Message);
-    return;
+    Console.WriteLine();
+    Console.WriteLine(title + ":");
+    foreach (var line in lines)
+        Console.WriteLine("  " + line);
 }
-
-using var reader = new UnitOfWork(connectionString);
-
-Console.WriteLine("Активні постачальники:");
-foreach (var s in reader.Suppliers.GetActive())
-    Console.WriteLine($"  {s.Id} {s.Name} ({s.TaxId})");
-
-Console.WriteLine("Замовлення:");
-foreach (var o in reader.PurchaseOrders.GetAll())
-    Console.WriteLine($"  №{o.Id} {o.Supplier} -> {o.Warehouse}, {o.Status}, {o.Total}, позицій: {o.Items}");
-
-Console.WriteLine("Низький запас:");
-foreach (var p in reader.Stock.GetLowStock())
-    Console.WriteLine($"  {p.Sku} {p.Name}: {p.TotalStock} (мінімум {p.MinStock})");
